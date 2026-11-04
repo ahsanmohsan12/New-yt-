@@ -1,0 +1,6 @@
+{
+  "name": "AI Video Factory",
+  "description": "Automated YouTube educational stickman explainer video production system with Gemini scriptwriting, Kokoro TTS, 3D/2D storyboard rendering, multi-GPU Colab workers, and Google Drive storage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
