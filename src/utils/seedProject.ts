@@ -188,7 +188,7 @@ const RAW_CHAPTERS = [
     id: 'ch-2',
     chapterNumber: 2,
     title: 'Chapter 2: The Stubborn Speed of Light',
-    narrationText: `To understand why time bends, we first have to look at the strangest experimental fact in all of physics: the speed of light never changes. In everyday life, speeds add together nicely. If Stickman Bob stands in the back of a pickup truck driving at fifty kilometers per hour and throws a baseball forward at一hundred kilometers per hour, someone standing by the road measures that baseball traveling at one hundred and fifty kilometers per hour. Simple addition. Now replace the baseball with a flashlight beam. Light travels through a vacuum at roughly three hundred thousand kilometers per second. If Bob rides a futuristic rocket moving at half the speed of light and shines his laser pointer forward, you might expect an outside observer to measure that laser beam traveling at one and a half times the speed of light. Yet when physicists actually perform this measurement, the light beam still moves at exact normal light speed—three hundred thousand kilometers per second. Because the speed of light refuses to budge, distance and time have to flex to make the math work.`,
+    narrationText: `To understand why time bends, we first have to look at the strangest experimental fact in all of physics: the speed of light never changes. In everyday life, speeds add together nicely. If Stickman Bob stands in the back of a pickup truck driving at fifty kilometers per hour and throws a baseball forward at one hundred kilometers per hour, someone standing by the road measures that baseball traveling at one hundred and fifty kilometers per hour. Simple addition. Now replace the baseball with a flashlight beam. Light travels through a vacuum at roughly three hundred thousand kilometers per second. If Bob rides a futuristic rocket moving at half the speed of light and shines his laser pointer forward, you might expect an outside observer to measure that laser beam traveling at one and a half times the speed of light. Yet when physicists actually perform this measurement, the light beam still moves at exact normal light speed—three hundred thousand kilometers per second. Because the speed of light refuses to budge, distance and time have to flex to make the math work.`,
   },
   {
     id: 'ch-3',
@@ -218,7 +218,7 @@ const RAW_CHAPTERS = [
     id: 'ch-7',
     chapterNumber: 7,
     title: 'Chapter 7: Gravitational Time Dilation Explained',
-    narrationText: `Let us place two stickmen on a tall skyscraperinside that accelerating rocket—or equivalently, inside Earth’s gravity. Alice stands at the top penthouse, and Bob stands in the basement. Bob sends flashes of green light upward to Alice once every second according to his basement wristwatch. As each wave of light climbs upward against gravity, it loses energy—just like a ball thrown upward slows down—except light cannot lose speed! Instead, light loses frequency, shifting toward the red end of the spectrum. Because the wave crests arrive at the penthouse stretched further apart in time, Alice measures more than one second between Bob’s flashes. In other words, clocks closer to a massive object tick slower than clocks high above it. Even on Earth, an optical lattice clock raised by just one millimeter ticks measurably faster than one sitting lower on the lab bench. Your head is literally a few nanoseconds older than your ankles over a lifetime.`,
+    narrationText: `Let us place two stickmen on a tall skyscraper inside that accelerating rocket—or equivalently, inside Earth’s gravity. Alice stands at the top penthouse, and Bob stands in the basement. Bob sends flashes of green light upward to Alice once every second according to his basement wristwatch. As each wave of light climbs upward against gravity, it loses energy—just like a ball thrown upward slows down—except light cannot lose speed! Instead, light loses frequency, shifting toward the red end of the spectrum. Because the wave crests arrive at the penthouse stretched further apart in time, Alice measures more than one second between Bob’s flashes. In other words, clocks closer to a massive object tick slower than clocks high above it. Even on Earth, an optical lattice clock raised by just one millimeter ticks measurably faster than one sitting lower on the lab bench. Your head is literally a few nanoseconds older than your ankles over a lifetime.`,
   },
   {
     id: 'ch-8',
@@ -396,12 +396,12 @@ export function createSeedRelativityProject(): VideoProjectJob {
   const { chapters, totalWordCount, estimatedTotalDurationSec } =
     calculateScriptMetrics(RAW_CHAPTERS, 145);
 
-  // Populate actual audio durations and word forced alignment for the seed project
+  // Populate actual audio durations (3.0s per chapter = 30.0s physical WAV & MP4) and word forced alignment
   let offset = 0;
   const enrichedChapters = chapters.map((ch) => {
-    const actualSec = Math.round((ch.estimatedDurationSec * 1.02) * 10) / 10;
+    const actualSec = 3.0;
     const wordTimestamps = computeWordForcedAlignment(ch.narrationText, actualSec, offset);
-    offset += actualSec;
+    offset = Math.round((offset + actualSec) * 100) / 100;
     return {
       ...ch,
       actualAudioDurationSec: actualSec,

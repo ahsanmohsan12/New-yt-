@@ -18,6 +18,7 @@ import {
   Sparkles,
   FileText,
   ArrowRight,
+  Trash2,
 } from 'lucide-react';
 
 export const GoogleSignInButton: React.FC<{
@@ -66,6 +67,7 @@ interface HomeDashboardProps {
   workers: GPUWorker[];
   activeProjectId: string;
   onSelectProject: (id: string, targetTab?: string) => void;
+  onDeleteProject?: (id: string) => void;
   onNavigateCreate: () => void;
   driveConnected: boolean;
   driveQuota: DriveStorageQuota | null;
@@ -78,6 +80,7 @@ export const HomeDashboardView: React.FC<HomeDashboardProps> = ({
   workers,
   activeProjectId,
   onSelectProject,
+  onDeleteProject,
   onNavigateCreate,
   driveConnected,
   driveQuota,
@@ -368,6 +371,16 @@ export const HomeDashboardView: React.FC<HomeDashboardProps> = ({
                       {proj.status === 'COMPLETED' ? 'Watch Final MP4' : 'Open Pipeline'}
                     </span>
                   </button>
+                  {projects.length > 1 && onDeleteProject && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteProject(proj.id)}
+                      aria-label={`Delete project ${proj.title}`}
+                      className="p-2.5 min-h-[42px] rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -680,6 +693,18 @@ export const ScriptStudioView: React.FC<ScriptStudioProps> = ({
     );
   };
 
+  const selectedHookObj =
+    project.hooks.find((h) => h.id === selectedHookId) || project.hooks[0];
+
+  const handleApplyHookToChapter1 = () => {
+    if (!selectedHookObj || editableChapters.length === 0) return;
+    const ch1 = editableChapters[0];
+    if (ch1.narrationText.startsWith(selectedHookObj.text)) return;
+    const sentences = ch1.narrationText.split(/(?<=[.!?])\s+/);
+    const bodyAfterFirst = sentences.length > 1 ? sentences.slice(1).join(' ') : ch1.narrationText;
+    handleChapterChange(ch1.id, `${selectedHookObj.text} ${bodyAfterFirst}`);
+  };
+
   return (
     <div className="space-y-8">
       {/* Header & Metrics Bar */}
@@ -751,15 +776,26 @@ export const ScriptStudioView: React.FC<ScriptStudioProps> = ({
               Potential (20%).
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowAllHooks((prev) => !prev)}
-            className="text-xs font-medium text-sky-400 hover:underline self-start sm:self-auto cursor-pointer"
-          >
-            {showAllHooks
-              ? 'Show Top 6 Hooks'
-              : `View All ${project.hooks.length} Ranked Hooks`}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            {selectedHookObj && (
+              <button
+                type="button"
+                onClick={handleApplyHookToChapter1}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-sky-400 transition-colors cursor-pointer"
+              >
+                Insert Selected Hook #{selectedHookObj.rank} into Chapter 1 Opening
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowAllHooks((prev) => !prev)}
+              className="text-xs font-medium text-sky-400 hover:underline self-start sm:self-auto cursor-pointer"
+            >
+              {showAllHooks
+                ? 'Show Top 6 Hooks'
+                : `View All ${project.hooks.length} Ranked Hooks`}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

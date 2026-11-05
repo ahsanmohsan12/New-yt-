@@ -9,6 +9,9 @@ import {
   claimNextAvailableChapterTask,
   calculateBenchmarkEta,
   evaluateSceneQuality,
+  getWavDurationSec,
+  formatSrtTimestamp,
+  generateSrtSubtitles,
 } from './pipelineLogic';
 import { ChapterTask, GPUWorker, StoryboardBeat } from '../types';
 
@@ -292,3 +295,38 @@ test('evaluateSceneQuality flags scenes with missing descriptions or excessive d
     'REVIEW'
   );
 });
+
+test('getWavDurationSec and generateSrtSubtitles compute exact audio and caption timings', () => {
+  // 4 seconds of 24kHz 16-bit mono PCM = 4 * 24000 * 2 = 192000 bytes + 44 header = 192044 bytes
+  assert.equal(getWavDurationSec(192044, 24000, 2), 4.0);
+  assert.equal(formatSrtTimestamp(65.42), '00:01:05,420');
+
+  const srt = generateSrtSubtitles([
+    {
+      scene_id: 'sc-1-01',
+      beatNumber: 1,
+      chapter_id: 'ch-1',
+      chapterNumber: 1,
+      narration_segment: 'Time bends near mass.',
+      semantic_description: 'Stickman next to mass',
+      visual_action: 'Points at mass',
+      character_pose: 'pointing',
+      props: ['clock'],
+      background: 'modern_dark',
+      diagram_type: 'none',
+      animation_type: 'pose',
+      camera_movement: 'static_wide',
+      transition: 'fade',
+      estimated_duration: 3,
+      startTime: 0,
+      endTime: 3.5,
+      actual_duration: 3.5,
+      approved: true,
+      qaStatus: 'PASS',
+    },
+  ]);
+
+  assert.ok(srt.includes('00:00:00,000 --> 00:00:03,500'));
+  assert.ok(srt.includes('[Ch 1] Time bends near mass.'));
+});
+

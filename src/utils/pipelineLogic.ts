@@ -443,3 +443,43 @@ export function evaluateSceneQuality(beat: StoryboardBeat): {
     notes: 'Semantic description, character pose, props, and synced audio timestamps verified.',
   };
 }
+
+/**
+ * Calculates the exact duration in seconds of a 24kHz 16-bit mono RIFF WAV buffer from its byte length.
+ */
+export function getWavDurationSec(byteLength: number, sampleRate = 24000, bytesPerSample = 2): number {
+  if (byteLength <= 44) return 0;
+  const pcmBytes = byteLength - 44;
+  return Math.round((pcmBytes / (sampleRate * bytesPerSample)) * 100) / 100;
+}
+
+/**
+ * Formats seconds into standard SRT timestamp format (HH:MM:SS,mmm).
+ */
+export function formatSrtTimestamp(seconds: number): string {
+  const safe = Math.max(0, seconds);
+  const hrs = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = Math.floor(safe % 60);
+  const ms = Math.round((safe - Math.floor(safe)) * 1000);
+  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(
+    2,
+    '0'
+  )},${String(Math.min(999, ms)).padStart(3, '0')}`;
+}
+
+/**
+ * Generates an SRT subtitle file string from synchronized storyboard beats.
+ */
+export function generateSrtSubtitles(beats: StoryboardBeat[]): string {
+  const sorted = [...beats].sort((a, b) => a.startTime - b.startTime);
+  return sorted
+    .map((beat, idx) => {
+      const start = formatSrtTimestamp(beat.startTime);
+      const end = formatSrtTimestamp(Math.max(beat.startTime + 0.2, beat.endTime));
+      const cleanText = beat.narration_segment.replace(/\r?\n/g, ' ').trim();
+      return `${idx + 1}\n${start} --> ${end}\n[Ch ${beat.chapterNumber}] ${cleanText}\n`;
+    })
+    .join('\n');
+}
+

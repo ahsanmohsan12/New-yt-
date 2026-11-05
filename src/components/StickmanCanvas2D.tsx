@@ -1,29 +1,78 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StoryboardBeat } from '../types';
+import { Play, Pause, SkipBack } from 'lucide-react';
 
 interface StickmanCanvas2DProps {
   beat: StoryboardBeat;
+  allBeats?: StoryboardBeat[];
+  combinedAudioUrl?: string | null;
   visualTheme?: 'classic_chalkboard' | 'modern_dark_tech' | 'blueprint_lab' | 'warm_paper';
   isPlaying?: boolean;
   showCaptions?: boolean;
+  onActiveBeatChange?: (beat: StoryboardBeat) => void;
 }
 
 export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
   beat,
+  allBeats,
+  combinedAudioUrl,
   visualTheme = 'modern_dark_tech',
   isPlaying = true,
   showCaptions = true,
+  onActiveBeatChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const beatRef = useRef(beat);
+  const allBeatsRef = useRef(allBeats || []);
   const themeRef = useRef(visualTheme);
   const showCaptionsRef = useRef(showCaptions);
 
+  const [isMoviePlaying, setIsMoviePlaying] = useState(false);
+  const [movieTimeSec, setMovieTimeSec] = useState(0);
+  const isMoviePlayingRef = useRef(false);
+
   useEffect(() => {
     beatRef.current = beat;
+    allBeatsRef.current = allBeats || [];
     themeRef.current = visualTheme;
     showCaptionsRef.current = showCaptions;
-  }, [beat, visualTheme, showCaptions]);
+  }, [beat, allBeats, visualTheme, showCaptions]);
+
+  const totalTimelineSec =
+    allBeats && allBeats.length > 0
+      ? allBeats[allBeats.length - 1].endTime
+      : beat.endTime;
+
+  const toggleMoviePlayback = () => {
+    const audio = audioRef.current;
+    if (isMoviePlayingRef.current) {
+      isMoviePlayingRef.current = false;
+      setIsMoviePlaying(false);
+      if (audio) audio.pause();
+    } else {
+      isMoviePlayingRef.current = true;
+      setIsMoviePlaying(true);
+      if (audio) {
+        audio.play().catch(() => {
+          // Fallback to internal clock if browser blocks autoplay
+        });
+      }
+    }
+  };
+
+  const resetMoviePlayback = () => {
+    isMoviePlayingRef.current = false;
+    setIsMoviePlaying(false);
+    setMovieTimeSec(0);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    if (allBeats && allBeats.length > 0 && onActiveBeatChange) {
+      onActiveBeatChange(allBeats[0]);
+    }
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -32,17 +81,57 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
     if (!ctx) return;
 
     let animId = 0;
-    let startTs = performance.now();
+    const startTs = performance.now();
+    let prevTs = startTs;
+    let virtualMovieClock = 0;
+    let lastNotifiedBeatId = beatRef.current.scene_id;
 
     const drawFrame = (now: number) => {
+      const dt = Math.min(0.1, (now - prevTs) / 1000);
+      prevTs = now;
       const elapsed = (now - startTs) / 1000;
-      const b = beatRef.current;
-      const theme = themeRef.current;
 
+      // Determine active beat when Full Storyboard Movie Mode is playing
+      let b = beatRef.current;
+      const beatsList = allBeatsRef.current;
+
+      if (isMoviePlayingRef.current && beatsList.length > 0) {
+        const audio = audioRef.current;
+        if (audio && !audio.paused && audio.duration > 0) {
+          // Map audio playback ratio onto the storyboard timeline
+          const maxTimeline = beatsList[beatsList.length - 1].endTime || 1;
+          const ratio = Math.min(1, audio.currentTime / audio.duration);
+          virtualMovieClock = ratio * maxTimeline;
+        } else {
+          virtualMovieClock += dt;
+          const maxTimeline = beatsList[beatsList.length - 1].endTime || 1;
+          if (virtualMovieClock >= maxTimeline) {
+            virtualMovieClock = 0;
+            isMoviePlayingRef.current = false;
+            setIsMoviePlaying(false);
+          }
+        }
+        setMovieTimeSec(Math.round(virtualMovieClock * 10) / 10);
+
+        const matched =
+          beatsList.find(
+            (item) =>
+              virtualMovieClock >= item.startTime && virtualMovieClock <= item.endTime
+          ) || beatsList[beatsList.length - 1];
+        if (matched) {
+          b = matched;
+          beatRef.current = matched;
+          if (matched.scene_id !== lastNotifiedBeatId) {
+            lastNotifiedBeatId = matched.scene_id;
+            if (onActiveBeatChange) onActiveBeatChange(matched);
+          }
+        }
+      }
+
+      const theme = themeRef.current;
       const W = canvas.width;
       const H = canvas.height;
 
-      // Theme palette
       const palettes = {
         modern_dark_tech: {
           bg: '#090D16',
@@ -111,7 +200,7 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
       ctx.scale(zoom, zoom);
       ctx.translate(-W / 2, -H / 2);
 
-      // Draw engineering grid
+      // Engineering grid
       ctx.strokeStyle = pal.grid;
       ctx.lineWidth = 1;
       for (let x = 0; x < W; x += 48) {
@@ -127,7 +216,7 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
         ctx.stroke();
       }
 
-      // Draw floor line
+      // Floor line
       const floorY = H * 0.78;
       ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
       ctx.lineWidth = 3;
@@ -136,8 +225,8 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
       ctx.lineTo(W - 60, floorY);
       ctx.stroke();
 
-      // Draw Stickman Character (Left-Center)
-      const stickX = b.diagram_type !== 'none' ? W * 0.28 : W * 0.38;
+      // Stickman Character (Left-Center)
+      const stickX = b.diagram_type !== 'none' ? W * 0.28 : W * 0.36;
       const walkOffset =
         b.character_pose === 'walking' || b.character_pose === 'running'
           ? Math.sin(elapsed * 5) * 18
@@ -204,11 +293,10 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
       ctx.lineTo(cx + stride, floorY);
       ctx.stroke();
 
-      // Arms based on pose
+      // Arms
       const shoulderY = headY + 44;
       const wave = Math.sin(elapsed * 4.5) * 14;
       ctx.beginPath();
-      // Left arm
       ctx.moveTo(cx, shoulderY);
       if (b.character_pose === 'celebrating' || b.character_pose === 'surprised') {
         ctx.lineTo(cx - 38, shoulderY - 35 + wave * 0.5);
@@ -218,7 +306,6 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
       } else {
         ctx.lineTo(cx - 34, shoulderY + 38);
       }
-      // Right arm (gesturing / pointing / holding laser pointer)
       ctx.moveTo(cx, shoulderY);
       const rightHandX =
         b.character_pose === 'pointing' || b.character_pose === 'explaining'
@@ -233,7 +320,7 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
       ctx.lineTo(rightHandX, rightHandY);
       ctx.stroke();
 
-      // Laser pointer prop or clock prop
+      // Props
       if (b.props.includes('laser_pointer') || b.diagram_type !== 'none') {
         ctx.strokeStyle = pal.accent;
         ctx.lineWidth = 3;
@@ -256,11 +343,11 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
         ctx.stroke();
       }
 
-      // Draw Right-Side Interactive Diagram / Whiteboard Panel
+      // Right-Side Interactive Diagram / Whiteboard Panel
       const boardX = W * 0.48;
-      const boardY = 72;
-      const boardW = W * 0.45;
-      const boardH = floorY - 92;
+      const boardY = 64;
+      const boardW = W * 0.46;
+      const boardH = floorY - 84;
 
       ctx.fillStyle = pal.stage;
       ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
@@ -270,11 +357,10 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
       ctx.fill();
       ctx.stroke();
 
-      // Board Header
       ctx.fillStyle = pal.accent;
-      ctx.font = '600 15px "JetBrains Mono", monospace';
+      ctx.font = '600 14px "JetBrains Mono", monospace';
       ctx.fillText(
-        `SCENE ${b.scene_id.toUpperCase()} · ${b.character_pose.toUpperCase()} · ${b.camera_movement.toUpperCase()}`,
+        `CH ${b.chapterNumber} · SCENE ${b.scene_id.toUpperCase()} · ${b.character_pose.toUpperCase()}`,
         boardX + 20,
         boardY + 30
       );
@@ -357,20 +443,41 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
             boardY + 95 + idx * 32
           );
         });
-      } else {
-        // Visual Action & Props Schematic Diagram
-        ctx.fillStyle = pal.stroke;
-        ctx.font = '600 18px "Outfit", sans-serif';
-        ctx.fillText(b.visual_action.slice(0, 46), boardX + 20, boardY + 72);
+      } else if (b.diagram_type === 'comparison_split' && b.diagram_data) {
+        const { labels, values, unit } = b.diagram_data;
+        values.forEach((v, i) => {
+          const rowY = boardY + 75 + i * 62;
+          ctx.fillStyle = '#1E293B';
+          ctx.beginPath();
+          ctx.roundRect(boardX + 24, rowY, boardW - 48, 46, 8);
+          ctx.fill();
 
-        // Draw animated schematic nodes for props
+          const barFillW = Math.min(boardW - 60, Math.max(40, (v / 50) * (boardW - 140)));
+          ctx.fillStyle = i === 0 ? pal.warn : i === 1 ? pal.secondary : pal.accent;
+          ctx.beginPath();
+          ctx.roundRect(boardX + 24, rowY, barFillW, 46, 8);
+          ctx.fill();
+
+          ctx.fillStyle = pal.stroke;
+          ctx.font = '600 13px "JetBrains Mono", monospace';
+          ctx.fillText(
+            `${labels[i] || 'Metric'}: ${v} ${unit || ''}`,
+            boardX + 38,
+            rowY + 28
+          );
+        });
+      } else {
+        ctx.fillStyle = pal.stroke;
+        ctx.font = '600 17px "Outfit", sans-serif';
+        ctx.fillText(b.visual_action.slice(0, 48), boardX + 20, boardY + 72);
+
         b.props.forEach((propName, i) => {
           const nx = boardX + 60 + i * 160;
           const ny = boardY + 150;
           ctx.strokeStyle = i % 2 === 0 ? pal.accent : pal.secondary;
           ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.roundRect(nx - 40, ny - 32, 128, 64, 10);
+          ctx.roundRect(nx - 40, ny - 32, 134, 64, 10);
           ctx.stroke();
 
           ctx.fillStyle = pal.stroke;
@@ -381,32 +488,31 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
 
       ctx.restore();
 
-      // Draw Synchronized Narration Caption Bar at Bottom of 16:9 Frame
+      // Synchronized Narration Caption Bar at Bottom of 16:9 Frame
       if (showCaptionsRef.current) {
-        ctx.fillStyle = 'rgba(9, 13, 22, 0.88)';
+        ctx.fillStyle = 'rgba(9, 13, 22, 0.9)';
         ctx.beginPath();
-        ctx.roundRect(60, H - 84, W - 120, 62, 10);
+        ctx.roundRect(50, H - 86, W - 100, 66, 10);
         ctx.fill();
         ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
         ctx.fillStyle = '#F8FAFC';
-        ctx.font = '500 17px "DM Sans", sans-serif';
+        ctx.font = '500 16px "DM Sans", sans-serif';
         ctx.textAlign = 'center';
         const caption =
           b.narration_segment.length > 98
             ? `${b.narration_segment.slice(0, 95)}...`
             : b.narration_segment;
-        ctx.fillText(caption, W / 2, H - 47);
+        ctx.fillText(caption, W / 2, H - 50);
 
-        // Timestamp pill in corner
         ctx.textAlign = 'right';
         ctx.fillStyle = '#38BDF8';
         ctx.font = '600 12px "JetBrains Mono", monospace';
         ctx.fillText(
-          `${b.startTime.toFixed(1)}s – ${b.endTime.toFixed(1)}s (${b.actual_duration.toFixed(1)}s)`,
-          W - 76,
+          `Beat #${b.beatNumber} · ${b.startTime.toFixed(1)}s – ${b.endTime.toFixed(1)}s`,
+          W - 68,
           H - 28
         );
         ctx.textAlign = 'left';
@@ -421,17 +527,70 @@ export const StickmanCanvas2D: React.FC<StickmanCanvas2DProps> = ({
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [isPlaying]);
+  }, [isPlaying, onActiveBeatChange]);
 
   return (
-    <div className="relative w-full aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-800">
-      <canvas
-        ref={canvasRef}
-        width={960}
-        height={540}
-        data-testid="stickman-canvas-2d"
-        className="w-full h-full block"
-      />
+    <div className="space-y-2">
+      <div className="relative w-full aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-800">
+        <canvas
+          ref={canvasRef}
+          width={960}
+          height={540}
+          data-testid="stickman-canvas-2d"
+          className="w-full h-full block"
+        />
+
+        {combinedAudioUrl && (
+          <audio ref={audioRef} src={combinedAudioUrl} preload="metadata" className="hidden" />
+        )}
+      </div>
+
+      {/* Full Synced Storyboard Movie Playback Transport Bar */}
+      {allBeats && allBeats.length > 1 && (
+        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleMoviePlayback}
+              className="px-3.5 min-h-[38px] rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              {isMoviePlaying ? (
+                <>
+                  <Pause className="w-3.5 h-3.5" />
+                  <span>Pause Synced Movie</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5" />
+                  <span>Play All {allBeats.length} Beats + Audio</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={resetMoviePlayback}
+              className="px-2.5 min-h-[38px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 cursor-pointer"
+              aria-label="Reset Storyboard Movie to Beat 1"
+            >
+              <SkipBack className="w-3.5 h-3.5" />
+              <span>Reset</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 font-mono tabular-nums text-slate-300">
+            <span>
+              Scene <strong className="text-sky-400">{beat.scene_id}</strong> (#{beat.beatNumber}/
+              {allBeats.length})
+            </span>
+            <span>·</span>
+            <span>
+              {isMoviePlaying ? `${movieTimeSec.toFixed(1)}s` : `${beat.startTime.toFixed(1)}s`} /{' '}
+              {totalTimelineSec.toFixed(1)}s
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

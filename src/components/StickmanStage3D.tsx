@@ -347,7 +347,8 @@ export const StickmanStage3D: React.FC<StickmanStage3DProps> = ({ beat }) => {
 
     // 8. Software-WebGL Safe Animation Loop (afterDraw with fenceSync on software WebGL)
     let frameId = 0;
-    const clock = new THREE.Clock();
+    const startMs = performance.now();
+    let prevMs = startMs;
 
     function afterDraw(cb: () => void) {
       const gl = renderer.getContext() as WebGL2RenderingContext;
@@ -366,8 +367,10 @@ export const StickmanStage3D: React.FC<StickmanStage3DProps> = ({ beat }) => {
     }
 
     function tick() {
-      const dt = Math.min(0.1, clock.getDelta());
-      const elapsed = clock.getElapsedTime();
+      const nowMs = performance.now();
+      const dt = Math.min(0.1, Math.max(0.001, (nowMs - prevMs) / 1000));
+      prevMs = nowMs;
+      const elapsed = (nowMs - startMs) / 1000;
       const currentBeat = beatRef.current;
       const ctrl = controlsStateRef.current;
 

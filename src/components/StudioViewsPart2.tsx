@@ -418,6 +418,12 @@ export const StoryboardStudioView: React.FC<StoryboardStudioProps> = ({
             {renderMode === '2d_kino' ? (
               <StickmanCanvas2D
                 beat={activeBeat}
+                allBeats={project.storyboard}
+                combinedAudioUrl={project.combinedAudioUrl}
+                onActiveBeatChange={(b) => {
+                  setActiveBeatId(b.scene_id);
+                  setSelectedChapterNum(b.chapterNumber);
+                }}
                 visualTheme={project.visualTheme}
                 isPlaying={true}
                 showCaptions={true}
@@ -443,7 +449,7 @@ export const StoryboardStudioView: React.FC<StoryboardStudioProps> = ({
               </span>
             </div>
 
-            <div className="space-y-2 text-xs">
+            <div className="space-y-3 text-xs">
               <div>
                 <span className="text-slate-400">Narration Segment:</span>
                 <p className="text-slate-100 mt-0.5 leading-relaxed font-medium">
@@ -456,11 +462,112 @@ export const StoryboardStudioView: React.FC<StoryboardStudioProps> = ({
                   {activeBeat.semantic_description}
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-2 pt-2 font-mono text-[11px] text-slate-300">
-                <div>Pose: {activeBeat.character_pose}</div>
-                <div>Camera: {activeBeat.camera_movement}</div>
-                <div>Diagram: {activeBeat.diagram_type}</div>
+
+              {/* Interactive Pose, Camera, and Diagram Selectors */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+                <div className="space-y-1">
+                  <label
+                    htmlFor="scene-pose-select"
+                    className="block text-[11px] font-mono text-slate-400"
+                  >
+                    Stickman Pose
+                  </label>
+                  <select
+                    id="scene-pose-select"
+                    value={activeBeat.character_pose}
+                    disabled={isBusy}
+                    onChange={(e) =>
+                      onRegenerateScene(activeBeat.scene_id, {
+                        character_pose: e.target.value as StoryboardBeat['character_pose'],
+                      })
+                    }
+                    className="w-full min-h-[36px] px-2.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono"
+                  >
+                    {[
+                      'explaining',
+                      'pointing',
+                      'thinking',
+                      'walking',
+                      'running',
+                      'surprised',
+                      'celebrating',
+                      'writing_board',
+                      'holding_prop',
+                      'comparing',
+                    ].map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label
+                    htmlFor="scene-camera-select"
+                    className="block text-[11px] font-mono text-slate-400"
+                  >
+                    Camera Move
+                  </label>
+                  <select
+                    id="scene-camera-select"
+                    value={activeBeat.camera_movement}
+                    disabled={isBusy}
+                    onChange={(e) =>
+                      onRegenerateScene(activeBeat.scene_id, {
+                        camera_movement: e.target.value as StoryboardBeat['camera_movement'],
+                      })
+                    }
+                    className="w-full min-h-[36px] px-2.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono"
+                  >
+                    {[
+                      'static_wide',
+                      'slow_zoom_in',
+                      'slow_zoom_out',
+                      'pan_left_to_right',
+                      'pan_right_to_left',
+                      'focus_character',
+                      'focus_diagram',
+                    ].map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label
+                    htmlFor="scene-diagram-select"
+                    className="block text-[11px] font-mono text-slate-400"
+                  >
+                    Visual Diagram
+                  </label>
+                  <select
+                    id="scene-diagram-select"
+                    value={activeBeat.diagram_type}
+                    disabled={isBusy}
+                    onChange={(e) =>
+                      onRegenerateScene(activeBeat.scene_id, {
+                        diagram_type: e.target.value as StoryboardBeat['diagram_type'],
+                      })
+                    }
+                    className="w-full min-h-[36px] px-2.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono"
+                  >
+                    {['none', 'bar_chart', 'line_graph', 'pie_chart', 'comparison_split'].map(
+                      (d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1 font-mono text-[11px] text-slate-400">
                 <div>Transition: {activeBeat.transition}</div>
+                <div>Duration: {activeBeat.actual_duration.toFixed(2)}s</div>
                 <div>Props: {activeBeat.props.join(', ')}</div>
                 <div>Asset Key: {activeBeat.assetReuseKey || 'rig_std'}</div>
               </div>
@@ -616,6 +723,7 @@ export const ProductionMonitorView: React.FC<ProductionMonitorProps> = ({
 }) => {
   const [showColabModal, setShowColabModal] = useState(false);
   const [workerNameInput, setWorkerNameInput] = useState('Colab-Tesla-T4-Alpha');
+  const [qaFilter, setQaFilter] = useState<'ALL' | 'PASS' | 'REVIEW' | 'REGENERATE'>('ALL');
 
   const completedChapters = project.chapterTasks.filter((t) => t.status === 'COMPLETED').length;
   const pendingChapters = project.chapterTasks.filter(
@@ -927,6 +1035,76 @@ export const ProductionMonitorView: React.FC<ProductionMonitorProps> = ({
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Visual & Sync Quality Control (QA) Audit Inspector */}
+      <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">
+              Automated Visual & Sync Quality Control ({project.storyboard.length} Beats Audited)
+            </h2>
+            <p className="text-xs text-slate-400">
+              Checks semantic narration match, stickman pose continuity, caption legibility, and
+              audio-video drift before marking output complete.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(['ALL', 'PASS', 'REVIEW', 'REGENERATE'] as const).map((status) => (
+              <button
+                key={status}
+                type="button"
+                onClick={() => setQaFilter(status)}
+                className={`px-3 min-h-[36px] rounded-lg text-xs font-mono transition-colors cursor-pointer ${
+                  qaFilter === status
+                    ? 'bg-sky-500 text-slate-950 font-semibold'
+                    : 'bg-slate-950 border border-slate-800 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                {status}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-h-[280px] overflow-y-auto pr-1">
+          {project.storyboard
+            .filter((b) => qaFilter === 'ALL' || b.qaStatus === qaFilter)
+            .slice(0, 12)
+            .map((beat) => (
+              <div
+                key={beat.scene_id}
+                className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between gap-2 text-xs"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between font-mono tabular-nums">
+                    <span className="text-slate-200 font-semibold">{beat.scene_id}</span>
+                    <span
+                      className={
+                        beat.qaStatus === 'PASS'
+                          ? 'text-emerald-400'
+                          : beat.qaStatus === 'REVIEW'
+                            ? 'text-amber-400'
+                            : 'text-rose-400'
+                      }
+                    >
+                      {beat.qaStatus}
+                    </span>
+                  </div>
+                  <p className="text-slate-400 line-clamp-1">"{beat.narration_segment}"</p>
+                  <p className="text-[11px] text-slate-500">{beat.qaNotes}</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => onRegenerateScene(beat.scene_id)}
+                  className="self-start text-[11px] font-mono text-sky-400 hover:underline cursor-pointer"
+                >
+                  Re-render & Verify {beat.scene_id}
+                </button>
+              </div>
+            ))}
         </div>
       </div>
     </div>

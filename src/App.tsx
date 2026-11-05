@@ -603,6 +603,16 @@ export default function App() {
               setActiveProjectId(id);
               if (targetTab) setActiveTab(targetTab as NavTab);
             }}
+            onDeleteProject={async (id) => {
+              const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+              const data = await res.json();
+              if (res.ok && Array.isArray(data.projects)) {
+                setProjects(data.projects);
+                if (activeProjectId === id && data.projects[0]) {
+                  setActiveProjectId(data.projects[0].id);
+                }
+              }
+            }}
             onNavigateCreate={() => setActiveTab('create')}
             driveConnected={driveConnected}
             driveQuota={driveQuota}

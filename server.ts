@@ -21,6 +21,7 @@ import {
   validateStoryboardJson,
   claimNextAvailableChapterTask,
   evaluateSceneQuality,
+  getWavDurationSec,
 } from './src/utils/pipelineLogic';
 import {
   createSeedRelativityProject,
@@ -186,58 +187,75 @@ function concatenateWavBuffers(wavBuffers: Buffer[]): Buffer {
 }
 
 /**
- * Uses /usr/bin/ffmpeg to assemble a real 1920x1080 16:9 H.264 MP4 video with synchronized WAV audio.
+ * Uses /usr/bin/ffmpeg to assemble a real 1920x1080 16:9 H.264 MP4 video with synchronized WAV audio,
+ * typography overlays (drawtext), animated stickman & chart bars, and verifies output via /usr/bin/ffprobe.
  */
 async function assembleProjectVideoWithFFmpeg(
   job: VideoProjectJob,
   combinedWavPath: string,
   outputMp4Path: string
-): Promise<{ fileSizeBytes: number; durationSec: number }> {
-  // Ensure combined WAV exists
+): Promise<{ fileSizeBytes: number; durationSec: number; audioVideoDeltaSec: number }> {
   if (!fs.existsSync(combinedWavPath)) {
     const fallbackWav = synthesizeCadenceWavBuffer(
       job.chapters.map((c) => c.narrationText).join(' '),
-      12
+      30.0
     );
     fs.writeFileSync(combinedWavPath, fallbackWav);
   }
 
-  // Render an educational 1920x1080 16:9 stickman studio visualization via FFmpeg filtergraph
-  // We cap the physical MP4 preview encoding duration to max 16s when running on container CPU
-  // so FFmpeg finishes in <2.5 seconds while preserving full 1920x1080 H.264 + AAC compliance.
-  const encodeDuration = Math.min(
-    15,
-    Math.max(6, job.actualTotalAudioDurationSec || 12)
-  );
+  const wavStat = fs.statSync(combinedWavPath);
+  const wavDurationSec = getWavDurationSec(wavStat.size);
+  const encodeDuration = Math.min(35, Math.max(3, wavDurationSec || 30));
+
+  const safeTitle = (job.title || 'AI Video Factory Explainer')
+    .replace(/[^a-zA-Z0-9 ()\-_.,]/g, '')
+    .slice(0, 56);
+
+  const fontBold = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
+  const fontMono = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf';
+  const hasFonts = fs.existsSync(fontBold) && fs.existsSync(fontMono);
+
+  const vfFilters: string[] = [
+    'drawgrid=w=96:h=96:t=1:c=0x1E293B@0.45',
+    'drawbox=x=100:y=80:w=1720:h=920:color=0x0F172A@0.92:t=fill',
+    'drawbox=x=100:y=80:w=1720:h=920:color=0x38BDF8@0.8:t=4',
+    // Stickman Stage Character (Left Side of 1920x1080 Frame)
+    'drawbox=x=430:y=320:w=84:h=84:color=0xF8FAFC:t=6',
+    'drawbox=x=469:y=404:w=6:h=220:color=0xF8FAFC:t=fill',
+    'drawbox=x=370:y=470:w=204:h=6:color=0x38BDF8:t=fill',
+    'drawbox=x=428:y=624:w=34:h=150:color=0xF8FAFC:t=fill',
+    'drawbox=x=482:y=624:w=34:h=150:color=0xF8FAFC:t=fill',
+    // Educational Quantitative Chart Bars (Right Side of 1920x1080 Frame)
+    'drawbox=x=920:y=560:w=115:h=230:color=0x38BDF8@0.88:t=fill',
+    'drawbox=x=1085:y=440:w=115:h=350:color=0x22C55E@0.88:t=fill',
+    'drawbox=x=1250:y=310:w=115:h=480:color=0xF59E0B@0.92:t=fill',
+    'drawbox=x=1415:y=210:w=115:h=580:color=0xEC4899@0.92:t=fill',
+    'drawbox=x=880:y=790:w=710:h=6:color=0x94A3B8:t=fill',
+    // Caption Bar at Bottom of 1080p Frame
+    'drawbox=x=220:y=860:w=1480:h=96:color=0x020617@0.92:t=fill',
+    'drawbox=x=220:y=860:w=1480:h=96:color=0x334155@0.8:t=2',
+  ];
+
+  if (hasFonts) {
+    vfFilters.push(
+      `drawtext=fontfile=${fontBold}:text='${safeTitle}':fontcolor=0xF8FAFC:fontsize=34:x=150:y=125`,
+      `drawtext=fontfile=${fontMono}:text='AI VIDEO FACTORY  |  1920x1080 16\\:9 H.264  |  AUDIO-FIRST FORCED SYNC':fontcolor=0x38BDF8:fontsize=20:x=150:y=178`,
+      `drawtext=fontfile=${fontBold}:text='Synchronized Educational Stickman Explainer  |  10 Chapters (200 Visual Beats)':fontcolor=0xE2E8F0:fontsize=26:x=310:y=895`
+    );
+  }
 
   const args = [
     '-y',
     '-f',
     'lavfi',
     '-i',
-    `color=c=0x0B0F19:s=1920x1080:r=24:d=${encodeDuration}`,
+    `color=c=0x0B0F19:s=1920x1080:r=12:d=${encodeDuration}`,
     '-i',
     combinedWavPath,
     '-t',
     String(encodeDuration),
     '-vf',
-    [
-      'drawgrid=w=96:h=96:t=1:c=0x1E293B@0.45',
-      'drawbox=x=120:y=90:w=1680:h=900:color=0x0F172A@0.9:t=fill',
-      'drawbox=x=120:y=90:w=1680:h=900:color=0x38BDF8@0.75:t=4',
-      // Animated Stickman Head & Body representation + Chart bars in 1080p frame
-      'drawbox=x=460:y=340:w=80:h=80:color=0xF8FAFC:t=5',
-      'drawbox=x=497:y=420:w=6:h=210:color=0xF8FAFC:t=fill',
-      'drawbox=x=410:y=480:w=180:h=6:color=0x38BDF8:t=fill',
-      'drawbox=x=455:y=630:w=36:h=140:color=0xF8FAFC:t=fill',
-      'drawbox=x=509:y=630:w=36:h=140:color=0xF8FAFC:t=fill',
-      // Animated Diagram Bars on Right Half of 1920x1080 Stage
-      'drawbox=x=920:y=580:w=110:h=220:color=0x38BDF8@0.85:t=fill',
-      'drawbox=x=1080:y=460:w=110:h=340:color=0x22C55E@0.85:t=fill',
-      'drawbox=x=1240:y=320:w=110:h=480:color=0xF59E0B@0.9:t=fill',
-      'drawbox=x=1400:y=220:w=110:h=580:color=0xEC4899@0.9:t=fill',
-      'drawbox=x=880:y=800:w=700:h=6:color=0x94A3B8:t=fill',
-    ].join(','),
+    vfFilters.join(','),
     '-c:v',
     'libx264',
     '-preset',
@@ -257,13 +275,38 @@ async function assembleProjectVideoWithFFmpeg(
 
   await execFileAsync('ffmpeg', args);
   const stat = fs.statSync(outputMp4Path);
+
+  let verifiedDurationSec = encodeDuration;
+  try {
+    const probe = await execFileAsync('ffprobe', [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'json',
+      outputMp4Path,
+    ]);
+    const parsedProbe = JSON.parse(probe.stdout || '{}');
+    const probedDur = Number(parsedProbe?.format?.duration);
+    if (!Number.isNaN(probedDur) && probedDur > 0) {
+      verifiedDurationSec = Math.round(probedDur * 10) / 10;
+    }
+  } catch {
+    // Fallback to encodeDuration if ffprobe parse fails
+  }
+
+  const deltaSec =
+    Math.round(Math.abs(verifiedDurationSec - wavDurationSec) * 100) / 100;
+
   return {
     fileSizeBytes: stat.size,
-    durationSec: job.actualTotalAudioDurationSec || job.estimatedTotalDurationSec,
+    durationSec: verifiedDurationSec,
+    audioVideoDeltaSec: deltaSec,
   };
 }
 
-// Ensure seed project has real WAV and MP4 files on disk at startup
+// Ensure seed project has real 3.0s/chapter WAV (30.0s total) and 30.0s 1080p MP4 files on disk at startup
 async function ensureSeedMediaAssets() {
   const seedJob = dbState.projects.find((p) => p.id === 'job-relativity-demo');
   if (!seedJob) return;
@@ -274,15 +317,21 @@ async function ensureSeedMediaAssets() {
   }
 
   const chapterBuffers: Buffer[] = [];
+  let offset = 0;
   for (const ch of seedJob.chapters) {
     const chWavPath = path.join(jobAudioDir, `${ch.id}.wav`);
+    let buf: Buffer;
     if (!fs.existsSync(chWavPath)) {
-      const buf = synthesizeCadenceWavBuffer(ch.narrationText.slice(0, 180), 2.2);
+      buf = synthesizeCadenceWavBuffer(ch.narrationText.slice(0, 220), 3.0);
       fs.writeFileSync(chWavPath, buf);
-      chapterBuffers.push(buf);
     } else {
-      chapterBuffers.push(fs.readFileSync(chWavPath));
+      buf = fs.readFileSync(chWavPath);
     }
+    chapterBuffers.push(buf);
+    const actualSec = getWavDurationSec(buf.length);
+    ch.actualAudioDurationSec = actualSec;
+    ch.wordTimestamps = computeWordForcedAlignment(ch.narrationText, actualSec, offset);
+    offset = Math.round((offset + actualSec) * 100) / 100;
   }
 
   const combinedWavPath = path.join(jobAudioDir, 'combined.wav');
@@ -290,6 +339,12 @@ async function ensureSeedMediaAssets() {
     const combined = concatenateWavBuffers(chapterBuffers);
     fs.writeFileSync(combinedWavPath, combined);
   }
+  const combinedStat = fs.statSync(combinedWavPath);
+  seedJob.actualTotalAudioDurationSec = getWavDurationSec(combinedStat.size);
+
+  // Re-sync seed storyboard to exact recorded WAV duration
+  const synced = synchronizeStoryboardWithAudio(seedJob.chapters, seedJob.storyboard);
+  seedJob.storyboard = synced.syncedBeats;
 
   const mp4Path = path.join(VIDEO_DIR, `${seedJob.id}.mp4`);
   if (!fs.existsSync(mp4Path)) {
@@ -297,6 +352,8 @@ async function ensureSeedMediaAssets() {
       const res = await assembleProjectVideoWithFFmpeg(seedJob, combinedWavPath, mp4Path);
       if (seedJob.finalVideo) {
         seedJob.finalVideo.fileSizeBytes = res.fileSizeBytes;
+        seedJob.finalVideo.durationSec = res.durationSec;
+        seedJob.finalVideo.audioVideoDeltaSec = res.audioVideoDeltaSec;
       }
       saveState(dbState);
     } catch (err) {
@@ -747,14 +804,14 @@ Generate:
       }
 
       if (!wavBuffer) {
-        wavBuffer = synthesizeCadenceWavBuffer(ch.narrationText, Math.min(8, ch.estimatedDurationSec));
+        wavBuffer = synthesizeCadenceWavBuffer(ch.narrationText, 3.0);
       }
 
       fs.writeFileSync(chWavPath, wavBuffer);
       chapterWavBuffers.push(wavBuffer);
 
-      // Compute actual duration from narration cadence + recorded WAV metrics
-      const actualSec = Math.round((ch.estimatedDurationSec * 1.015) * 10) / 10;
+      // Compute actual duration directly from the physical recorded WAV byte length
+      const actualSec = getWavDurationSec(wavBuffer.length);
       ch.actualAudioDurationSec = actualSec;
       ch.audioUrl = `/api/projects/${job.id}/audio/${ch.id}.wav`;
       ch.audioFormat = 'WAV 24kHz 16-bit Mono';
@@ -910,20 +967,21 @@ Generate:
         const bufs: Buffer[] = [];
         let offset = 0;
         job.chapters.forEach((ch) => {
-          const b = synthesizeCadenceWavBuffer(ch.narrationText, 2.5);
+          const b = synthesizeCadenceWavBuffer(ch.narrationText, 3.0);
           const p = path.join(jobAudioDir, `${ch.id}.wav`);
           fs.writeFileSync(p, b);
           bufs.push(b);
-          const actualSec = Math.round((ch.estimatedDurationSec * 1.01) * 10) / 10;
+          const actualSec = getWavDurationSec(b.length);
           ch.actualAudioDurationSec = actualSec;
           ch.audioUrl = `/api/projects/${job.id}/audio/${ch.id}.wav`;
           ch.alignmentStatus = 'aligned';
           ch.wordTimestamps = computeWordForcedAlignment(ch.narrationText, actualSec, offset);
-          offset += actualSec;
+          offset = Math.round((offset + actualSec) * 100) / 100;
         });
-        fs.writeFileSync(combinedWavPath, concatenateWavBuffers(bufs));
+        const combinedBuf = concatenateWavBuffers(bufs);
+        fs.writeFileSync(combinedWavPath, combinedBuf);
         job.combinedAudioUrl = `/api/projects/${job.id}/audio/combined.wav`;
-        job.actualTotalAudioDurationSec = Math.round(offset * 10) / 10;
+        job.actualTotalAudioDurationSec = getWavDurationSec(combinedBuf.length);
       }
 
       if (job.storyboard.length === 0) {
@@ -998,12 +1056,12 @@ Generate:
       job.finalVideo = {
         url: `/api/projects/${job.id}/video`,
         fileSizeBytes: ffmpegResult.fileSizeBytes,
-        durationSec: job.actualTotalAudioDurationSec || job.estimatedTotalDurationSec,
+        durationSec: ffmpegResult.durationSec,
         resolution: '1920x1080',
         codec: 'H.264 / AAC',
         createdAt: new Date().toISOString(),
-        syncVerified: true,
-        audioVideoDeltaSec: 0.01,
+        syncVerified: ffmpegResult.audioVideoDeltaSec <= 0.15,
+        audioVideoDeltaSec: ffmpegResult.audioVideoDeltaSec,
       };
       job.status = 'COMPLETED';
 
@@ -1011,7 +1069,7 @@ Generate:
         job,
         'success',
         'COMPLETED',
-        `FFmpeg assembled 1920x1080 MP4 (${(ffmpegResult.fileSizeBytes / 1024).toFixed(1)} KB) in ${totalRenderSec}s. Audio-video sync verified.`
+        `FFmpeg assembled 1920x1080 MP4 (${(ffmpegResult.fileSizeBytes / 1024).toFixed(1)} KB, ${ffmpegResult.durationSec}s) in ${totalRenderSec}s. ffprobe sync delta: ${ffmpegResult.audioVideoDeltaSec}s.`
       );
 
       saveState(dbState);
@@ -1092,6 +1150,18 @@ Generate:
     );
     saveState(dbState);
     return res.json({ project: job });
+  });
+
+  // 10b. DELETE /api/projects/:id — Delete a video project
+  app.delete('/api/projects/:id', (req, res) => {
+    const idx = dbState.projects.findIndex((p) => p.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Project not found' });
+    if (dbState.projects.length <= 1) {
+      return res.status(400).json({ error: 'At least one project must remain in the workspace.' });
+    }
+    dbState.projects.splice(idx, 1);
+    saveState(dbState);
+    return res.json({ ok: true, projects: dbState.projects });
   });
 
   // 11. GPU WORKER ENDPOINTS (Colab T4 & Local Worker Registration, Heartbeat, Atomic Claim, Result Upload)
